@@ -1,0 +1,15 @@
+---
+- name: Create and update certs
+  hosts: all
+  gather_facts: yes
+
+  any_errors_fatal: yes
+  max_fail_percentage: 0
+
+  tasks:
+    - name: System information
+      debug:
+        msg: "The OS in {{ ansible_host }} is {{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+  roles:
+    - create_and_update_certs

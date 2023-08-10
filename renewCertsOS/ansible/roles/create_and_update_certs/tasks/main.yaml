@@ -1,0 +1,35 @@
+---
+- name: Fetch certificate
+  uri:
+    url: "{{ vaultUrl }}/v1/{{ vaultMount }}/fetch/{{ vaultRole }}"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ auth_token }}"
+    body_format: json
+    validate_certs: false
+    body: {
+      "common_name": "{{ ansible_host }}",
+      "email": "",
+      "format": "pkcs12",
+      "passphrase": ""
+    }
+  register: responce_fetch
+
+- name: Certificats info
+  debug:
+    msg: "{{ responce_fetch }}"
+
+- name: Certificats info
+  debug:
+    msg:
+      - "Date: {{ responce_fetch | json_query('date') }}"
+      - "Expires_date: {{ responce_fetch.json.data | json_query('expires') }}"
+      - "Private_key_type: {{ responce_fetch.json.data | json_query('private_key_type') }}"
+      - "Serial_number: {{ responce_fetch.json.data | json_query('serial_number') }}"
+
+- name: Encoded certification data
+  set_fact:
+    encoded_data_cert: "{{ responce_fetch.json.data | json_query('certificate') }}"
+
+- name: Create certficate .pfx
+  shell: echo '{{ encoded_data_cert }}' | base64 --decode > /tmp/{{ ansible_host }}.pfx

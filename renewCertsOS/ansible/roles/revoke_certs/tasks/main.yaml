@@ -1,0 +1,36 @@
+---
+- name: Each serial number
+  set_fact:
+    serial_number_list: "{{ serial_number.split(',') }}"
+
+- name: Revoke certificate
+  uri:
+    url: "{{ vaultUrl }}/v1/{{ vaultMount }}/revoke"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ auth_token }}"
+    body_format: json
+    validate_certs: false
+    body: {
+      "serial_number": "{{ item|string }}",
+      "reason": "unspecified"
+    }
+  loop: "{{ serial_number_list }}"
+  register: responce_revoke
+
+- name: All list responce_revoke
+  set_fact:
+    all_responce: "{{ responce_revoke.results | map(attribute='json') | list }}"
+
+- name: Certification info
+  debug:
+    msg:
+      - "Status: {{ item.data.status }}"
+      - "Date_created: {{ item.data.created }}"
+      - "Date_expires: {{ item.data.expires }}"
+      - "Email: {{ item.data.email }}"
+      - "Serial_number: {{ item.data.serial_number }}"
+      - "Revocation_time: {{ item.data.revocation_time }}"
+  loop: "{{ all_responce }}"
+  loop_control:
+    label: "Revoke info"

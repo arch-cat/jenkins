@@ -1,0 +1,111 @@
+// Jenkinsfile
+
+@Library('sharedLibrary') _
+
+
+pipeline {
+    agent { node { label 'Linux_Default || linux_slave || masterLin' } }
+    options {
+        ansiColor('xterm') // Устанавливаем AnsiColor для Pipeline
+    }
+
+    parameters{
+        choice(name: 'STAND', choices: ['dev', 'prod'], description: 'Select a stand:')
+        choice(name: 'METHOD', choices: ['fetch', 'revoke', 'sign_csr'], description: 'Select a method:')
+        string(name: 'CERTIFICATE_SN', defaultValue: '', description: 'Введите серийный номер сертификата, только для метода revoke')
+        booleanParam(name: 'ENABLE_DEBUG', defaultValue: false, description: 'Enable debug mode')
+    }
+
+    stages {
+        stage('Get Vault Data') {
+            steps {
+                script {
+                    def consoleUtils = new classes(this)
+                    consoleUtils.printHeader("Get Vault Data")
+
+                    def stand = params.STAND
+                    def standObjectName = "${stand}"
+                    def standObject = this."$standObjectName"
+
+                    def Map vault_config = standObject.vault_config()
+
+                    withCredentials([[
+                        $class: 'VaultTokenCredentialBinding',
+                        credentialsId: "${vault_config.vaultCredentialId}",
+                        vaultNamespace: "${vault_config.vaultNamespace}",
+                        vaultAddr: "${vault_config.vaultUrl}"
+                    ]]) {
+			            env.VAULT_TOKEN = VAULT_TOKEN
+			            env.VAULT_URL = "${vault_config.vaultUrl}"
+			            env.VAULT_MOUNT = "${vault_config.vaultMount}"
+			            env.VAULT_ROLE = "${vault_config.vaultRole}"
+                    }
+                }
+            }
+        }
+
+		stage('Clone Repository') {
+			steps {
+			    script {
+			        def consoleUtils = new classes(this)
+			        consoleUtils.printHeader("Clone Repository")
+			        consoleUtils.printInfo("Клонирование репозитория...")
+	                function.cloneRepository()
+	                consoleUtils.printInfo("Клонирование репозитория 'Успешно'")
+			    }
+			}
+		}
+
+        stage('Deployment') {
+			steps {
+			    script {
+			        def consoleUtils = new classes(this)
+			        consoleUtils.printHeader("Deployment")
+			        consoleUtils.printInfo("Запуск Playbook")
+
+                    def STAND = params.STAND
+                    def standObject = "${STAND}"
+                    def standObjectName = this."$standObject"
+                    def (METHOD, DEBUG_MODE, CERTIFICATE_SN) = standObjectName.param_vars()
+
+                    def (ANSIBLE_PATH, JENKINS_PATH) = standObjectName.env_vars()
+
+                    def maskedVars = [
+                        [password: VAULT_TOKEN],
+                    ]
+
+                    maskPasswords(varPasswordPairs: maskedVars) {
+                        withCredentials([sshUserPrivateKey(credentialsId: 'SSH_HOST', keyFileVariable: 'SSH_PRIVATE_KEY')]) {
+                            ansiblePlaybook(
+                                inventory: "${JENKINS_PATH}/inventory/${STAND}/",
+                                playbook: "${ANSIBLE_PATH}/${METHOD}_certs.yaml",
+                                hostKeyChecking: false,
+                                colorized: true,
+                                extras: '-e "ansible_ssh_private_key_file=$SSH_PRIVATE_KEY"',
+                                extraVars: [
+                                    debug_mode: "${DEBUG_MODE}",
+                                    auth_token: VAULT_TOKEN,
+                                    vaultUrl: VAULT_URL,
+                                    vaultSberCAMount: VAULT_MOUNT,
+                                    vaultSberCARole: VAULT_ROLE,
+                                    serial_number: CERTIFICATE_SN
+                                ]
+                            )
+                        }
+                    }
+			        consoleUtils.printInfo("Playbook успешно отработал")
+			    }
+			}
+		}
+	}
+
+    post {
+        success {
+            script {
+                def consoleUtils = new classes(this)
+                consoleUtils.printHeader("Очистка workspace")
+                cleanWs disableDeferredWipeout: true, deleteDirs: true
+            }
+        }
+    }
+}
